@@ -5,10 +5,11 @@ import { usePathname } from 'next/navigation';
 import { Logo, BrandText } from './Logo';
 
 const NAV_ITEMS = [
-  { href: '/owner/home',      label: '홈',       icon: IconHome },
-  { href: '/owner/ingredients', label: '일반 재료', icon: IconBox },
-  { href: '/owner/prep-items',  label: '준비 재료', icon: IconFlask },
+  { href: '/owner/home',        label: '홈',         icon: IconHome },
+  { href: '/owner/ingredients', label: '일반 재료',   icon: IconBox },
+  { href: '/owner/prep-items',  label: '준비 재료',   icon: IconFlask },
   { href: '/owner/menus',       label: '메뉴 · 원가', icon: IconChart },
+  { href: '/owner/inventory',   label: '재고 · 매입', icon: IconStack },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -139,6 +140,15 @@ function IconChart(props: React.SVGProps<SVGSVGElement>) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" {...props}>
       <path d="M3 3v18h18" />
       <path d="M7 14l4-4 4 4 5-5" />
+    </svg>
+  );
+}
+function IconStack(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <polygon points="12 2 2 7 12 12 22 7 12 2" />
+      <polyline points="2 17 12 22 22 17" />
+      <polyline points="2 12 12 17 22 12" />
     </svg>
   );
 }

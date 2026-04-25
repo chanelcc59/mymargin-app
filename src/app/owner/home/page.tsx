@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { rawIngredientStore, prepItemStore, menuStore } from '@/lib/store';
+import { rawIngredientStore, prepItemStore, menuStore, inventoryEventStore } from '@/lib/store';
 import {
   calcAllChannelMargins,
   formatKRW,
@@ -10,6 +10,8 @@ import {
   judgeMargin,
   judgeMenuTier,
   isRawNeedsInfo,
+  calcAllCurrentStock,
+  judgeStock,
 } from '@/lib/cost-engine';
 import type { ChannelKey } from '@/types/domain';
 
@@ -29,6 +31,8 @@ export default function OwnerHomePage() {
     Array<{ channel: ChannelKey; label: string; avgRate: number; count: number }>
   >([]);
   const [needsInfoCount, setNeedsInfoCount] = useState(0);
+  const [shortStockCount, setShortStockCount] = useState(0);
+  const [lowStockCount, setLowStockCount] = useState(0);
 
   useEffect(() => {
     const raws = rawIngredientStore.list();
@@ -39,6 +43,20 @@ export default function OwnerHomePage() {
     setPrepCount(preps.length);
     setMenuCount(menus.length);
     setNeedsInfoCount(raws.filter(isRawNeedsInfo).length);
+
+    // 재고 부족·소진 카운트
+    const events = inventoryEventStore.list();
+    const stockMap = calcAllCurrentStock(raws, events);
+    const eventCountByRaw = new Map<string, number>();
+    events.forEach((e) => eventCountByRaw.set(e.rawId, (eventCountByRaw.get(e.rawId) ?? 0) + 1));
+    let short = 0, low = 0;
+    raws.forEach((r) => {
+      const tier = judgeStock(r, stockMap.get(r.id) ?? 0, (eventCountByRaw.get(r.id) ?? 0) > 0);
+      if (tier === 'short') short++;
+      else if (tier === 'low') low++;
+    });
+    setShortStockCount(short);
+    setLowStockCount(low);
 
     // 채널별 공헌이익률 가장 낮은 3개
     const allMargins: Array<{ menuId: string; name: string; channel: string; rate: number; profit: number }> = [];
@@ -141,6 +159,23 @@ export default function OwnerHomePage() {
             <div className="text-[11px] text-ink-3 mt-0.5">단가가 0원으로 잡혀 메뉴 원가가 실제보다 낮게 계산되고 있어요</div>
           </div>
           <span className="text-warning font-bold text-[13px]">채우러 가기 →</span>
+        </Link>
+      )}
+
+      {(shortStockCount > 0 || lowStockCount > 0) && (
+        <Link
+          href="/owner/inventory"
+          className="bg-alert-bg border border-alert/40 rounded-2xl p-4 flex items-center justify-between gap-3 hover:border-alert transition-colors"
+        >
+          <div>
+            <div className="text-[14px] font-bold tracking-tighter text-alert">
+              {shortStockCount > 0 && <>소진 <span className="font-serif-num">{shortStockCount}</span>개 </>}
+              {shortStockCount > 0 && lowStockCount > 0 && <span className="text-ink-3 font-normal">·</span>}
+              {lowStockCount > 0 && <> 부족 <span className="font-serif-num">{lowStockCount}</span>개</>}
+            </div>
+            <div className="text-[11px] text-ink-3 mt-0.5">곧 발주가 필요한 재료가 있어요</div>
+          </div>
+          <span className="text-alert font-bold text-[13px]">재고 보기 →</span>
         </Link>
       )}
 
@@ -274,7 +309,7 @@ export default function OwnerHomePage() {
           <QuickLink href="/owner/ingredients" label="재료 등록" />
           <QuickLink href="/owner/prep-items" label="양념장 만들기" />
           <QuickLink href="/owner/menus" label="메뉴 관리" />
-          <QuickLink href="/owner/ingredients" label="단가 변경" />
+          <QuickLink href="/owner/inventory" label="매입 기록" />
         </div>
       </div>
     </div>

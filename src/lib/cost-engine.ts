@@ -12,6 +12,7 @@ import type {
   MenuChannelConfig,
   ChannelKey,
   Unit,
+  InventoryEvent,
 } from '@/types/domain';
 
 // ============================================
@@ -323,6 +324,77 @@ export function judgeMenuTier(
   const tiers = margins.map((m) => judgeMargin(m.contributionMarginRate));
   if (tiers.every((t) => t === 'good')) return 'recommended';
   return 'caution';
+}
+
+// ============================================
+// 4-3. 재고 계산 (Inventory)
+// ============================================
+// 한 재료의 현재고를 이벤트 원장에서 계산.
+// - 시간순 정렬 후 순차 적용
+// - 'count' 이벤트는 절대값으로 누적값을 리셋 (실사 기준점)
+// - 'purchase'는 +, 'waste'는 -
+export function calcCurrentStock(rawId: string, events: InventoryEvent[]): number {
+  const sorted = events
+    .filter((e) => e.rawId === rawId)
+    .sort((a, b) => a.occurredAt - b.occurredAt);
+  let stock = 0;
+  for (const e of sorted) {
+    if (e.type === 'count') stock = e.qty;
+    else if (e.type === 'purchase') stock += e.qty;
+    else if (e.type === 'waste') stock -= e.qty;
+  }
+  return stock;
+}
+
+// 모든 재료의 현재고 맵을 한번에 계산 (페이지 렌더 용도)
+export function calcAllCurrentStock(
+  raws: RawIngredient[],
+  events: InventoryEvent[]
+): Map<string, number> {
+  const byRaw = new Map<string, InventoryEvent[]>();
+  events.forEach((e) => {
+    const arr = byRaw.get(e.rawId) ?? [];
+    arr.push(e);
+    byRaw.set(e.rawId, arr);
+  });
+  const result = new Map<string, number>();
+  raws.forEach((r) => {
+    const evts = byRaw.get(r.id) ?? [];
+    if (evts.length === 0) {
+      result.set(r.id, 0);
+      return;
+    }
+    evts.sort((a, b) => a.occurredAt - b.occurredAt);
+    let stock = 0;
+    for (const e of evts) {
+      if (e.type === 'count') stock = e.qty;
+      else if (e.type === 'purchase') stock += e.qty;
+      else if (e.type === 'waste') stock -= e.qty;
+    }
+    result.set(r.id, stock);
+  });
+  return result;
+}
+
+// 재고 등급 (UI 표시용)
+// - none: 이력 없음 (점주가 아직 등록 안 함)
+// - short: 0 이하 (소진)
+// - low: 매입 1회분의 20% 미만 (곧 떨어짐)
+// - ok: 충분
+export type StockTier = 'none' | 'short' | 'low' | 'ok';
+
+export function judgeStock(
+  raw: RawIngredient,
+  stock: number,
+  hasAnyEvent: boolean
+): StockTier {
+  if (!hasAnyEvent) return 'none';
+  if (stock <= 0) return 'short';
+  if (raw.purchaseQty > 0) {
+    const oneOrderInBase = raw.purchaseQty * getUnitConversionRatio(raw.baseUnit, raw.purchaseUnit);
+    if (oneOrderInBase > 0 && stock < oneOrderInBase * 0.2) return 'low';
+  }
+  return 'ok';
 }
 
 // ============================================

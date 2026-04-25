@@ -2,7 +2,7 @@
 // 저장소 - 현재는 localStorage, 나중에 Supabase로 교체 예정
 // 모든 CRUD는 이 파일을 통해서만 한다 (교체 가능성 보호)
 
-import type { RawIngredient, PrepItem, Menu } from '@/types/domain';
+import type { RawIngredient, PrepItem, Menu, InventoryEvent } from '@/types/domain';
 
 // ============================================
 // 저장 키
@@ -11,6 +11,7 @@ const KEYS = {
   rawIngredients: 'mymargin:raw_ingredients',
   prepItems: 'mymargin:prep_items',
   menus: 'mymargin:menus',
+  inventoryEvents: 'mymargin:inventory_events',
   version: 'mymargin:version',
 } as const;
 
@@ -173,6 +174,49 @@ export const menuStore = {
 };
 
 // ============================================
+// Inventory Events (재고 이벤트 원장)
+// 모든 재고 변동(매입/실사/폐기)을 이벤트로 누적 기록
+// ============================================
+export const inventoryEventStore = {
+  list(): InventoryEvent[] {
+    return read<InventoryEvent[]>(KEYS.inventoryEvents, []);
+  },
+
+  listByRaw(rawId: string): InventoryEvent[] {
+    return this.list().filter((e) => e.rawId === rawId);
+  },
+
+  create(input: Omit<InventoryEvent, 'id' | 'createdAt'>): InventoryEvent {
+    const item: InventoryEvent = {
+      ...input,
+      id: genId('evt'),
+      createdAt: now(),
+    };
+    const list = this.list();
+    list.push(item);
+    write(KEYS.inventoryEvents, list);
+    return item;
+  },
+
+  delete(id: string): boolean {
+    const list = this.list();
+    const next = list.filter((e) => e.id !== id);
+    if (next.length === list.length) return false;
+    write(KEYS.inventoryEvents, next);
+    return true;
+  },
+
+  // 특정 재료가 삭제될 때 같이 정리하기 위함 (외래키 정리)
+  deleteByRaw(rawId: string): number {
+    const list = this.list();
+    const next = list.filter((e) => e.rawId !== rawId);
+    const removed = list.length - next.length;
+    if (removed > 0) write(KEYS.inventoryEvents, next);
+    return removed;
+  },
+};
+
+// ============================================
 // 초기화 + 시드 데이터
 // ============================================
 export function getStorageVersion(): number {
@@ -193,12 +237,13 @@ export function clearAll(): void {
 export function seedDemoData(): void {
   if (getStorageVersion() >= CURRENT_VERSION) return;
 
-  // 버전 2: 새 시드 적용 시 기존 데이터 정리
+  // 버전 업 시 기존 데이터 정리
   // (사용자가 입력한 진짜 데이터가 있다면 위험할 수 있으나, 현재는 시드 데이터뿐이라 OK)
   if (getStorageVersion() < CURRENT_VERSION) {
     write(KEYS.rawIngredients, []);
     write(KEYS.prepItems, []);
     write(KEYS.menus, []);
+    write(KEYS.inventoryEvents, []);
   }
 
   // ============================================

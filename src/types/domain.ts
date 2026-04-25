@@ -92,6 +92,29 @@ export interface Menu {
 }
 
 // ============================================
+// 재고 이벤트 (Inventory Ledger)
+// 모든 재고 변동은 이벤트로 누적 기록한다. 현재고는 합산으로 계산.
+// ============================================
+export type InventoryEventType =
+  | 'purchase'  // 매입 — qty만큼 증가
+  | 'count'     // 실사 — 그 시점의 절대 잔량으로 리셋
+  | 'waste';    // 폐기 — qty만큼 감소
+
+export interface InventoryEvent {
+  id: string;
+  rawId: string;                  // 일반 재료 ID
+  type: InventoryEventType;
+  // qty 단위: 항상 해당 재료의 baseUnit 기준 (g, ml, ea 등)
+  // - purchase / waste: 변동량 절대값(부호 없음 — type으로 방향 결정)
+  // - count: 시점 잔량 (이전 이력은 합산에서 무시되고 여기부터 다시 누적)
+  qty: number;
+  reason?: string;                // 폐기 사유 등
+  occurredAt: number;             // 발생 시점 (Date.now)
+  note?: string;
+  createdAt: number;
+}
+
+// ============================================
 // 계산 결과 타입 (view 성격, 저장하지 않음)
 // ============================================
 export interface PrepItemCostResult {
