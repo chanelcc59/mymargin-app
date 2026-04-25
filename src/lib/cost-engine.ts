@@ -347,6 +347,21 @@ export function calcCurrentStock(rawId: string, events: InventoryEvent[]): numbe
   return stock;
 }
 
+// 특정 시점(asOfMs 포함)에 한 재료의 재고를 계산.
+// asOfMs 이후의 이벤트는 무시.
+export function calcStockAt(rawId: string, events: InventoryEvent[], asOfMs: number): number {
+  const sorted = events
+    .filter((e) => e.rawId === rawId && e.occurredAt <= asOfMs)
+    .sort((a, b) => a.occurredAt - b.occurredAt);
+  let stock = 0;
+  for (const e of sorted) {
+    if (e.type === 'count') stock = e.qty;
+    else if (e.type === 'purchase') stock += e.qty;
+    else if (e.type === 'waste') stock -= e.qty;
+  }
+  return stock;
+}
+
 // 모든 재료의 현재고 맵을 한번에 계산 (페이지 렌더 용도)
 export function calcAllCurrentStock(
   raws: RawIngredient[],
@@ -463,6 +478,121 @@ export function calcMenuRawConsumption(
     result.set(e.rawId, (result.get(e.rawId) ?? 0) + e.qty);
   }
   return result;
+}
+
+// ============================================
+// 4-5. 로스 분석 (이론 vs 실제)
+// ============================================
+// 비전 문서 정의:
+//   실제 감소량 = 기초재고 + 매입 - 기말재고
+//   설명 가능한 로스 = 폐기 (1차 범위)
+//   설명 안 되는 로스 = 실제 감소량 - 이론 소모량 - 설명 가능한 로스
+//
+// 주의: 기간 [from, to) 사이에 'count' 실사가 끼어있으면 위 단순 공식이 부정확.
+// 이 경우 hasMidCount=true 로 표시하여 화면에서 "정확도 주의" 알림 가능.
+export interface LossAnalysisRow {
+  rawId: string;
+  rawName: string;
+  unit: Unit;
+  unitCost: number;            // baseUnit 1단위당 단가
+  startStock: number;          // 기초 재고 (period 시작 직전 시점)
+  endStock: number;            // 기말 재고 (period 끝 시점)
+  purchase: number;            // 기간 매입 합
+  waste: number;               // 기간 폐기 합 (= 설명 가능한 로스)
+  theoretical: number;         // 이론 소모량 (판매×레시피)
+  actualDecrease: number;      // 실제 감소량 = startStock + purchase - endStock
+  unexplainedLoss: number;     // 설명 안 되는 로스 (음수 가능 — 이론보다 덜 쓴 경우)
+  unexplainedLossCost: number; // 설명 안 되는 로스의 금액 (max(0, loss) × unitCost)
+  hasMidCount: boolean;        // 기간 안에 count 이벤트가 있는지 (정확도 주의)
+}
+
+export interface LossAnalysisRange {
+  fromMs: number;              // 기간 시작 (포함)
+  toMs: number;                // 기간 끝 (포함)
+  fromDate: string;            // 'YYYY-MM-DD' (이론 소모량 계산용)
+  toDate: string;
+}
+
+export function analyzeLoss(
+  raws: RawIngredient[],
+  preps: PrepItem[],
+  menus: Menu[],
+  events: InventoryEvent[],
+  sales: SaleEntry[],
+  range: LossAnalysisRange
+): LossAnalysisRow[] {
+  const theoreticalMap = calcTheoreticalConsumption(sales, menus, preps, {
+    from: range.fromDate,
+    to: range.toDate,
+  });
+
+  // raw별 이벤트 인덱싱
+  const eventsByRaw = new Map<string, InventoryEvent[]>();
+  events.forEach((e) => {
+    const arr = eventsByRaw.get(e.rawId) ?? [];
+    arr.push(e);
+    eventsByRaw.set(e.rawId, arr);
+  });
+
+  return raws.map((raw) => {
+    const rawEvents = eventsByRaw.get(raw.id) ?? [];
+    const inRange = rawEvents.filter((e) => e.occurredAt >= range.fromMs && e.occurredAt <= range.toMs);
+
+    const startStock = calcStockAt(raw.id, rawEvents, range.fromMs - 1);
+    const endStock = calcStockAt(raw.id, rawEvents, range.toMs);
+    const purchase = inRange.filter((e) => e.type === 'purchase').reduce((s, e) => s + e.qty, 0);
+    const waste = inRange.filter((e) => e.type === 'waste').reduce((s, e) => s + e.qty, 0);
+    const theoretical = theoreticalMap.get(raw.id) ?? 0;
+    const hasMidCount = inRange.some((e) => e.type === 'count');
+
+    const actualDecrease = startStock + purchase - endStock;
+    const unexplainedLoss = actualDecrease - theoretical - waste;
+    const unitCost = getRawIngredientUnitCost(raw);
+    const unexplainedLossCost = Math.max(0, unexplainedLoss) * unitCost;
+
+    return {
+      rawId: raw.id,
+      rawName: raw.name,
+      unit: raw.baseUnit,
+      unitCost,
+      startStock,
+      endStock,
+      purchase,
+      waste,
+      theoretical,
+      actualDecrease,
+      unexplainedLoss,
+      unexplainedLossCost,
+      hasMidCount,
+    };
+  });
+}
+
+// 로스 분석 결과의 종합 요약
+export interface LossAnalysisSummary {
+  totalUnexplainedLossCost: number;  // 설명 안 되는 로스 금액 합
+  totalWaste: number;                // 폐기 건수
+  rowsWithLoss: number;              // 설명 안 되는 로스가 양수인 raw 개수
+  rowsWithData: number;              // 분석 가능한(이벤트 있는) raw 개수
+  warningCount: number;              // hasMidCount 경고 행 수
+}
+
+export function summarizeLoss(rows: LossAnalysisRow[]): LossAnalysisSummary {
+  let totalUnexplainedLossCost = 0;
+  let totalWaste = 0;
+  let rowsWithLoss = 0;
+  let rowsWithData = 0;
+  let warningCount = 0;
+
+  rows.forEach((r) => {
+    totalUnexplainedLossCost += r.unexplainedLossCost;
+    totalWaste += r.waste;
+    if (r.unexplainedLoss > 0) rowsWithLoss++;
+    if (r.purchase > 0 || r.waste > 0 || r.theoretical > 0 || r.startStock !== 0 || r.endStock !== 0) rowsWithData++;
+    if (r.hasMidCount) warningCount++;
+  });
+
+  return { totalUnexplainedLossCost, totalWaste, rowsWithLoss, rowsWithData, warningCount };
 }
 
 // ============================================

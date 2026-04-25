@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: '/owner/menus',       label: '메뉴 · 원가', icon: IconChart },
   { href: '/owner/inventory',   label: '재고 · 매입', icon: IconStack },
   { href: '/owner/sales',       label: '판매 입력',   icon: IconReceipt },
+  { href: '/owner/loss',        label: '로스 분석',   icon: IconAlertTri },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -160,6 +161,15 @@ function IconReceipt(props: React.SVGProps<SVGSVGElement>) {
       <line x1="8" y1="8" x2="16" y2="8" />
       <line x1="8" y1="12" x2="16" y2="12" />
       <line x1="8" y1="16" x2="13" y2="16" />
+    </svg>
+  );
+}
+function IconAlertTri(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
     </svg>
   );
 }
