@@ -2,7 +2,7 @@
 // 저장소 - 현재는 localStorage, 나중에 Supabase로 교체 예정
 // 모든 CRUD는 이 파일을 통해서만 한다 (교체 가능성 보호)
 
-import type { RawIngredient, PrepItem, Menu, InventoryEvent } from '@/types/domain';
+import type { RawIngredient, PrepItem, Menu, InventoryEvent, SaleEntry } from '@/types/domain';
 
 // ============================================
 // 저장 키
@@ -12,6 +12,7 @@ const KEYS = {
   prepItems: 'mymargin:prep_items',
   menus: 'mymargin:menus',
   inventoryEvents: 'mymargin:inventory_events',
+  sales: 'mymargin:sales',
   version: 'mymargin:version',
 } as const;
 
@@ -217,6 +218,66 @@ export const inventoryEventStore = {
 };
 
 // ============================================
+// Sales (판매 기록)
+// 일자별 메뉴 판매 수량
+// ============================================
+export const saleStore = {
+  list(): SaleEntry[] {
+    return read<SaleEntry[]>(KEYS.sales, []);
+  },
+
+  listByDate(date: string): SaleEntry[] {
+    return this.list().filter((s) => s.date === date);
+  },
+
+  listByMenu(menuId: string): SaleEntry[] {
+    return this.list().filter((s) => s.menuId === menuId);
+  },
+
+  create(input: Omit<SaleEntry, 'id' | 'createdAt' | 'updatedAt'>): SaleEntry {
+    const item: SaleEntry = {
+      ...input,
+      id: genId('sale'),
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    const list = this.list();
+    list.push(item);
+    write(KEYS.sales, list);
+    return item;
+  },
+
+  update(id: string, patch: Partial<Omit<SaleEntry, 'id' | 'createdAt'>>): SaleEntry | null {
+    const list = this.list();
+    const idx = list.findIndex((s) => s.id === id);
+    if (idx === -1) return null;
+    list[idx] = { ...list[idx], ...patch, id, updatedAt: now() };
+    write(KEYS.sales, list);
+    return list[idx];
+  },
+
+  delete(id: string): boolean {
+    const list = this.list();
+    const next = list.filter((s) => s.id !== id);
+    if (next.length === list.length) return false;
+    write(KEYS.sales, next);
+    return true;
+  },
+
+  // upsert: 같은 (date, menuId, channel?) 조합이 있으면 qty 갱신, 없으면 새로 생성
+  upsertDayMenu(input: Omit<SaleEntry, 'id' | 'createdAt' | 'updatedAt'>): SaleEntry {
+    const list = this.list();
+    const idx = list.findIndex(
+      (s) => s.date === input.date && s.menuId === input.menuId && (s.channel ?? null) === (input.channel ?? null)
+    );
+    if (idx === -1) return this.create(input);
+    list[idx] = { ...list[idx], ...input, id: list[idx].id, updatedAt: now() };
+    write(KEYS.sales, list);
+    return list[idx];
+  },
+};
+
+// ============================================
 // 초기화 + 시드 데이터
 // ============================================
 export function getStorageVersion(): number {
@@ -244,6 +305,7 @@ export function seedDemoData(): void {
     write(KEYS.prepItems, []);
     write(KEYS.menus, []);
     write(KEYS.inventoryEvents, []);
+    write(KEYS.sales, []);
   }
 
   // ============================================

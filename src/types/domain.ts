@@ -115,6 +115,21 @@ export interface InventoryEvent {
 }
 
 // ============================================
+// 판매 기록 (Sale Entry)
+// 일자별 메뉴 판매 수량. 이론 소모량·정산 분석의 기초 데이터.
+// ============================================
+export interface SaleEntry {
+  id: string;
+  date: string;                   // YYYY-MM-DD (현지 일자)
+  menuId: string;
+  qty: number;                    // 그 일자에 그 메뉴를 몇 개 팔았는지
+  channel?: ChannelKey;           // 채널 분리 입력은 선택 (생략시 통합)
+  note?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// ============================================
 // 계산 결과 타입 (view 성격, 저장하지 않음)
 // ============================================
 export interface PrepItemCostResult {

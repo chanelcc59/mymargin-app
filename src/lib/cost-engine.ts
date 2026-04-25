@@ -13,6 +13,7 @@ import type {
   ChannelKey,
   Unit,
   InventoryEvent,
+  SaleEntry,
 } from '@/types/domain';
 
 // ============================================
@@ -395,6 +396,73 @@ export function judgeStock(
     if (oneOrderInBase > 0 && stock < oneOrderInBase * 0.2) return 'low';
   }
   return 'ok';
+}
+
+// ============================================
+// 4-4. 이론 소모량 계산 (판매 데이터 → 재료 소모량)
+// ============================================
+// 판매 1건이 소비하는 재료를 모두 raw 단위로 환산해서 반환.
+// prep 항목은 prep.items 풀어서 raw로 합산 (예: 양념장 80g → 고춧가루 8g + 설탕 12g + ...)
+function expandRecipeToRaw(
+  menu: Menu,
+  qty: number,
+  prepById: Map<string, PrepItem>
+): Array<{ rawId: string; qty: number }> {
+  const result: Array<{ rawId: string; qty: number }> = [];
+  for (const item of menu.recipe) {
+    if (item.kind === 'raw') {
+      result.push({ rawId: item.rawIngredientId, qty: item.qty * qty });
+    } else {
+      const prep = prepById.get(item.prepItemId);
+      if (!prep || prep.yieldQty <= 0) continue;
+      // 메뉴에서 이 prep을 (item.qty * qty) 만큼 소비함.
+      // prep 1 yieldUnit당 raw별 소비량 = prep.items[i].qty / prep.yieldQty
+      const ratio = (item.qty * qty) / prep.yieldQty;
+      for (const sub of prep.items) {
+        result.push({ rawId: sub.rawIngredientId, qty: sub.qty * ratio });
+      }
+    }
+  }
+  return result;
+}
+
+// 기간 내 모든 판매 기록을 합쳐 raw별 이론 소모량 맵 반환.
+// from/to는 'YYYY-MM-DD' 문자열로 비교 (생략시 전체).
+export function calcTheoreticalConsumption(
+  sales: SaleEntry[],
+  menus: Menu[],
+  preps: PrepItem[],
+  range?: { from?: string; to?: string }
+): Map<string, number> {
+  const menuById = new Map(menus.map((m) => [m.id, m]));
+  const prepById = new Map(preps.map((p) => [p.id, p]));
+  const result = new Map<string, number>();
+
+  for (const s of sales) {
+    if (range?.from && s.date < range.from) continue;
+    if (range?.to && s.date > range.to) continue;
+    const menu = menuById.get(s.menuId);
+    if (!menu || s.qty <= 0) continue;
+
+    const expanded = expandRecipeToRaw(menu, s.qty, prepById);
+    for (const e of expanded) {
+      result.set(e.rawId, (result.get(e.rawId) ?? 0) + e.qty);
+    }
+  }
+  return result;
+}
+
+// 한 메뉴 1인분의 raw 소모량 (미리보기·메뉴 카드 등에서 사용 가능)
+export function calcMenuRawConsumption(
+  menu: Menu,
+  preps: PrepItem[]
+): Map<string, number> {
+  const prepById = new Map(preps.map((p) => [p.id, p]));
+  const result = new Map<string, number>();
+  for (const e of expandRecipeToRaw(menu, 1, prepById)) {
+    result.set(e.rawId, (result.get(e.rawId) ?? 0) + e.qty);
+  }
+  return result;
 }
 
 // ============================================
