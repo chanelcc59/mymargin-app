@@ -130,6 +130,56 @@ export interface SaleEntry {
 }
 
 // ============================================
+// 매장 (Store)
+// 1차에서는 단일 매장만 가정. 멀티 매장은 추후.
+// ============================================
+export interface Store {
+  id: string;                   // 'default' 고정 (현재는 단일)
+  name: string;
+  address?: string;
+  lat?: number;
+  lng?: number;
+  attendanceRadiusM: number;    // 출퇴근 허용 반경 (m, 기본 100)
+  createdAt: number;
+  updatedAt: number;
+}
+
+// ============================================
+// 직원 (Employee)
+// ============================================
+export type EmployeeRole = 'owner' | 'staff';
+
+export interface Employee {
+  id: string;
+  name: string;
+  role: EmployeeRole;
+  hourlyWage?: number;          // 시급 (4차 인건비 계산용 필드, 1차엔 표시만)
+  active: boolean;
+  note?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// ============================================
+// 근태 기록 (AttendanceRecord)
+// ============================================
+export type AttendanceType = 'check_in' | 'check_out';
+
+export interface AttendanceRecord {
+  id: string;
+  employeeId: string;
+  type: AttendanceType;
+  occurredAt: number;
+  // 위치 검증 데이터
+  lat?: number;
+  lng?: number;
+  distanceM?: number;           // 매장 좌표와의 거리 (m)
+  accepted: boolean;            // 반경 통과 여부 (거부된 시도도 기록할지는 정책에 따라)
+  note?: string;
+  createdAt: number;
+}
+
+// ============================================
 // 계산 결과 타입 (view 성격, 저장하지 않음)
 // ============================================
 export interface PrepItemCostResult {

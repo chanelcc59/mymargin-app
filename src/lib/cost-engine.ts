@@ -596,6 +596,35 @@ export function summarizeLoss(rows: LossAnalysisRow[]): LossAnalysisSummary {
 }
 
 // ============================================
+// 4-6. 위치 거리 계산 (Haversine) — 근태 위치 검증용
+// ============================================
+// 두 좌표 사이의 거리를 미터 단위로 반환.
+// 지구 반지름 6,371,000m 기준 (대원 거리).
+export function distanceMeters(
+  lat1: number, lng1: number,
+  lat2: number, lng2: number
+): number {
+  const R = 6371000;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const phi1 = toRad(lat1);
+  const phi2 = toRad(lat2);
+  const dPhi = toRad(lat2 - lat1);
+  const dLambda = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dPhi / 2) ** 2 +
+    Math.cos(phi1) * Math.cos(phi2) * Math.sin(dLambda / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+// 거리를 사용자에게 표시할 형식으로 (10m 미만은 1m 단위, 그 이상은 10m 단위 반올림, 1000m 이상은 km)
+export function formatDistance(m: number): string {
+  if (m < 10) return `${Math.round(m)}m`;
+  if (m < 1000) return `${Math.round(m / 10) * 10}m`;
+  return `${(m / 1000).toFixed(2)}km`;
+}
+
+// ============================================
 // 5. 포맷 유틸
 // ============================================
 export function formatKRW(n: number): string {

@@ -2,7 +2,10 @@
 // 저장소 - 현재는 localStorage, 나중에 Supabase로 교체 예정
 // 모든 CRUD는 이 파일을 통해서만 한다 (교체 가능성 보호)
 
-import type { RawIngredient, PrepItem, Menu, InventoryEvent, SaleEntry } from '@/types/domain';
+import type {
+  RawIngredient, PrepItem, Menu, InventoryEvent, SaleEntry,
+  Store, Employee, AttendanceRecord,
+} from '@/types/domain';
 
 // ============================================
 // 저장 키
@@ -13,8 +16,13 @@ const KEYS = {
   menus: 'mymargin:menus',
   inventoryEvents: 'mymargin:inventory_events',
   sales: 'mymargin:sales',
+  store: 'mymargin:store',
+  employees: 'mymargin:employees',
+  attendance: 'mymargin:attendance',
   version: 'mymargin:version',
 } as const;
+
+const DEFAULT_ATTENDANCE_RADIUS_M = 100;
 
 const CURRENT_VERSION = 4;
 
@@ -278,6 +286,135 @@ export const saleStore = {
 };
 
 // ============================================
+// Store (매장) - 단일 객체
+// 1차에서는 'default' 매장만 운영 (멀티 매장은 후속 단계)
+// ============================================
+const STORE_ID = 'default';
+
+export const storeStore = {
+  get(): Store | null {
+    return read<Store | null>(KEYS.store, null);
+  },
+
+  // 항상 한 매장만 — upsert 형태로 저장
+  upsert(input: Partial<Omit<Store, 'id' | 'createdAt' | 'updatedAt'>>): Store {
+    const existing = this.get();
+    if (existing) {
+      const updated: Store = { ...existing, ...input, id: STORE_ID, updatedAt: now() };
+      write(KEYS.store, updated);
+      return updated;
+    }
+    const created: Store = {
+      id: STORE_ID,
+      name: input.name ?? '내 매장',
+      address: input.address,
+      lat: input.lat,
+      lng: input.lng,
+      attendanceRadiusM: input.attendanceRadiusM ?? DEFAULT_ATTENDANCE_RADIUS_M,
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    write(KEYS.store, created);
+    return created;
+  },
+};
+
+// ============================================
+// Employees (직원)
+// ============================================
+export const employeeStore = {
+  list(): Employee[] {
+    return read<Employee[]>(KEYS.employees, []);
+  },
+
+  get(id: string): Employee | undefined {
+    return this.list().find((e) => e.id === id);
+  },
+
+  create(input: Omit<Employee, 'id' | 'createdAt' | 'updatedAt'>): Employee {
+    const item: Employee = {
+      ...input,
+      id: genId('emp'),
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    const list = this.list();
+    list.push(item);
+    write(KEYS.employees, list);
+    return item;
+  },
+
+  update(id: string, patch: Partial<Omit<Employee, 'id' | 'createdAt'>>): Employee | null {
+    const list = this.list();
+    const idx = list.findIndex((e) => e.id === id);
+    if (idx === -1) return null;
+    list[idx] = { ...list[idx], ...patch, id, updatedAt: now() };
+    write(KEYS.employees, list);
+    return list[idx];
+  },
+
+  delete(id: string): boolean {
+    const list = this.list();
+    const next = list.filter((e) => e.id !== id);
+    if (next.length === list.length) return false;
+    write(KEYS.employees, next);
+    return true;
+  },
+};
+
+// ============================================
+// Attendance (근태 기록)
+// ============================================
+export const attendanceStore = {
+  list(): AttendanceRecord[] {
+    return read<AttendanceRecord[]>(KEYS.attendance, []);
+  },
+
+  listByEmployee(employeeId: string): AttendanceRecord[] {
+    return this.list().filter((a) => a.employeeId === employeeId);
+  },
+
+  // 특정 일자(YYYY-MM-DD, 현지 시각 기준) 의 모든 기록
+  listByDate(ymd: string): AttendanceRecord[] {
+    return this.list().filter((a) => {
+      const d = new Date(a.occurredAt);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}` === ymd;
+    });
+  },
+
+  create(input: Omit<AttendanceRecord, 'id' | 'createdAt'>): AttendanceRecord {
+    const item: AttendanceRecord = {
+      ...input,
+      id: genId('att'),
+      createdAt: now(),
+    };
+    const list = this.list();
+    list.push(item);
+    write(KEYS.attendance, list);
+    return item;
+  },
+
+  delete(id: string): boolean {
+    const list = this.list();
+    const next = list.filter((a) => a.id !== id);
+    if (next.length === list.length) return false;
+    write(KEYS.attendance, next);
+    return true;
+  },
+
+  deleteByEmployee(employeeId: string): number {
+    const list = this.list();
+    const next = list.filter((a) => a.employeeId !== employeeId);
+    const removed = list.length - next.length;
+    if (removed > 0) write(KEYS.attendance, next);
+    return removed;
+  },
+};
+
+// ============================================
 // 초기화 + 시드 데이터
 // ============================================
 export function getStorageVersion(): number {
@@ -306,6 +443,7 @@ export function seedDemoData(): void {
     write(KEYS.menus, []);
     write(KEYS.inventoryEvents, []);
     write(KEYS.sales, []);
+    // 매장·직원·근태는 사용자가 직접 만들어가는 데이터라 시드에서는 건드리지 않음
   }
 
   // ============================================
