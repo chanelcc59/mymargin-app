@@ -10,8 +10,11 @@ import type {
 } from '@/types/domain';
 import {
   calcMenuCost, calcChannelMargin, formatKRW, formatRate, judgeMargin,
+  judgeMenuTier, MENU_TIER_LABEL,
   DEFAULT_CHANNEL_CONFIG, getRawIngredientUnitCost, isCompatibleUnit,
+  isRawNeedsInfo,
 } from '@/lib/cost-engine';
+import type { MenuTier } from '@/lib/cost-engine';
 import { SearchBox, CategoryChips } from '@/components/Filters';
 
 const CHANNEL_LABELS: Record<ChannelKey, string> = {
@@ -24,6 +27,18 @@ const CHANNEL_DESC: Record<ChannelKey, string> = {
   dine_in: '홀 판매 · 카드 수수료만 반영',
   takeout: '포장 판매 · 포장비 포함',
   delivery: '배달 판매 · 플랫폼/결제/포장비 포함',
+};
+
+const MENU_TIER_BADGE_CLASS: Record<MenuTier, string> = {
+  recommended: 'bg-accent-bg text-accent',
+  caution:     'bg-warning-bg text-warning',
+  review:      'bg-alert-bg text-alert',
+};
+
+const MENU_TIER_DESC: Record<MenuTier, string> = {
+  recommended: '모든 활성 채널의 공헌이익률이 양호해요',
+  caution:     '일부 채널이 마진이 낮아요. 가격이나 원가를 점검해보세요',
+  review:      '레시피·판매가가 비어있거나 적자 채널이 있어요',
 };
 
 // 단가 표시 헬퍼 (소수점 자동)
@@ -88,6 +103,11 @@ export default function MenuDetailPage() {
     [menu, raws, preps]
   );
 
+  const tier = useMemo<MenuTier | null>(
+    () => (menu ? judgeMenuTier(menu, raws, preps) : null),
+    [menu, raws, preps]
+  );
+
   if (!loaded) return <div className="text-ink-3 text-sm">로딩 중...</div>;
   if (notFound || !menu)
     return (
@@ -125,11 +145,24 @@ export default function MenuDetailPage() {
             <h1 className="font-serif text-[28px] md:text-[32px] font-medium tracking-tightest text-ink leading-tight">
               {menu.name}
             </h1>
+            {tier && (
+              <span
+                className={['text-[11px] font-bold px-2 py-0.5 rounded-md tracking-[0.02em]', MENU_TIER_BADGE_CLASS[tier]].join(' ')}
+                title={MENU_TIER_DESC[tier]}
+              >
+                {MENU_TIER_LABEL[tier]}
+              </span>
+            )}
             <button onClick={handleRenameMenu} className="text-[11px] text-ink-3 hover:text-navy font-bold">이름 수정</button>
           </div>
-          {menu.category && (
-            <div className="text-[11px] text-ink-3 font-bold tracking-[0.04em] uppercase mt-1">{menu.category}</div>
-          )}
+          <div className="flex items-baseline gap-2 mt-1 flex-wrap">
+            {menu.category && (
+              <div className="text-[11px] text-ink-3 font-bold tracking-[0.04em] uppercase">{menu.category}</div>
+            )}
+            {tier && (
+              <div className="text-[11px] text-ink-3">{MENU_TIER_DESC[tier]}</div>
+            )}
+          </div>
         </div>
         <button onClick={handleDelete} className="text-[12px] text-ink-4 hover:text-alert font-bold flex-shrink-0 pt-1.5">삭제</button>
       </div>
@@ -244,6 +277,8 @@ function RecipeSection({
             const breakdown = cost?.breakdown[idx];
             const isRaw = item.kind === 'raw';
             const rawId = isRaw ? (item as any).rawIngredientId : null;
+            const rawObj = isRaw && rawId ? raws.find((r) => r.id === rawId) : null;
+            const needsInfo = rawObj ? isRawNeedsInfo(rawObj) : false;
             const unitCostText = breakdown
               ? (isRaw
                   ? formatPerUnit((breakdown as any).unitCost, breakdown.unit)
@@ -258,12 +293,19 @@ function RecipeSection({
                   {isRaw ? '일반' : '준비'}
                 </div>
                 <div className="min-w-0">
-                  <div className="text-[13px] font-semibold text-ink tracking-tighter truncate">
-                    {breakdown?.name ?? '(삭제된 재료)'}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <div className="text-[13px] font-semibold text-ink tracking-tighter truncate">
+                      {breakdown?.name ?? '(삭제된 재료)'}
+                    </div>
+                    {needsInfo && (
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-warning-bg text-warning tracking-[0.04em]">정보 필요</span>
+                    )}
                   </div>
                   {breakdown && (
                     <div className="text-[11px] text-ink-3 flex items-center gap-1.5 flex-wrap">
-                      <span>{unitCostText}</span>
+                      <span className={needsInfo ? 'text-warning font-bold' : ''}>
+                        {needsInfo ? '단가 미입력 → 원가 0원' : unitCostText}
+                      </span>
                       {isRaw && rawId && (
                         <button
                           onClick={() => setEditingRawId(rawId)}
@@ -397,6 +439,23 @@ function RawPickerModal({
     );
   }
 
+  const handleQuickCreate = () => {
+    const name = query.trim();
+    if (!name) return;
+    const created = rawIngredientStore.create({
+      name,
+      baseUnit: 'g',
+      purchaseQty: 0,
+      purchaseUnit: 'kg',
+      purchasePrice: 0,
+      shippingCost: 0,
+      needsInfo: true,
+    });
+    onCreated(created.id);
+  };
+
+  const exactMatch = !!query.trim() && raws.some((r) => r.name.toLowerCase() === query.trim().toLowerCase());
+
   return (
     <div
       className="fixed inset-0 bg-navy/45 backdrop-blur-sm flex items-center md:items-center items-end justify-center z-50 p-0 md:p-5"
@@ -434,17 +493,27 @@ function RawPickerModal({
         </div>
 
         <div className="flex-1 overflow-y-auto py-2">
-          {filtered.length === 0 ? (
-            <div className="px-6 py-8 text-center text-[13px] text-ink-3">
-              검색 결과 없음
+          {query.trim() && !exactMatch && (
+            <div className="px-6 pb-2 pt-1 flex flex-wrap gap-2 border-b border-border">
+              <button
+                onClick={handleQuickCreate}
+                className="flex-1 min-w-[140px] px-3 py-2 bg-accent text-white text-[12px] font-bold rounded-lg hover:bg-accent-dark"
+                title="이름만 등록하고 단가는 나중에 입력"
+              >＋ "{query.trim()}" 빠른 추가</button>
               <button
                 onClick={() => setCreating(true)}
-                className="block mx-auto mt-3 px-4 py-2 bg-accent text-white text-[12px] font-bold rounded-lg hover:bg-accent-dark"
-              >＋ "{query || '새 재료'}" 추가하기</button>
+                className="flex-1 min-w-[140px] px-3 py-2 border border-border-strong text-ink-2 text-[12px] font-bold rounded-lg hover:border-navy hover:text-navy"
+              >＋ 매입 정보까지 입력</button>
+            </div>
+          )}
+          {filtered.length === 0 ? (
+            <div className="px-6 py-6 text-center text-[13px] text-ink-3">
+              {query.trim() ? '일치하는 재료 없음 — 위 버튼으로 추가하세요' : '재료를 검색하거나 새로 추가하세요'}
             </div>
           ) : (
             filtered.map((r) => {
               const unitCost = getRawIngredientUnitCost(r);
+              const needsInfo = isRawNeedsInfo(r);
               return (
                 <button
                   key={r.id}
@@ -452,11 +521,16 @@ function RawPickerModal({
                   className="w-full px-6 py-2.5 flex items-baseline justify-between gap-3 hover:bg-surface-alt text-left"
                 >
                   <div className="min-w-0">
-                    <div className="text-[14px] font-semibold text-ink tracking-tighter truncate">{r.name}</div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <div className="text-[14px] font-semibold text-ink tracking-tighter truncate">{r.name}</div>
+                      {needsInfo && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-warning-bg text-warning tracking-[0.04em]">정보 필요</span>
+                      )}
+                    </div>
                     {r.category && <div className="text-[10px] text-ink-3">{r.category}</div>}
                   </div>
                   <div className="text-[11px] text-ink-3 font-serif-num flex-shrink-0">
-                    {formatPerUnit(unitCost, r.baseUnit)}
+                    {needsInfo ? <span className="text-warning font-bold">단가 미입력</span> : formatPerUnit(unitCost, r.baseUnit)}
                   </div>
                 </button>
               );
@@ -589,6 +663,8 @@ function RawEditForm({
       purchaseUnit,
       purchasePrice: priceNum,
       shippingCost: shippingNum,
+      // 매입양·매입가가 정상이면 needsInfo 자동 해제
+      needsInfo: false,
       note: note.trim() || undefined,
     };
     if (raw) {

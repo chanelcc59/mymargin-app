@@ -7,6 +7,7 @@ import {
   formatKRW,
   getRawIngredientUnitCost,
   isCompatibleUnit,
+  isRawNeedsInfo,
 } from '@/lib/cost-engine';
 import { SearchBox, CategoryChips } from '@/components/Filters';
 
@@ -52,6 +53,9 @@ export default function IngredientsPage() {
 
   const [query, setQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<string>('all');
+  const [needsInfoOnly, setNeedsInfoOnly] = useState(false);
+
+  const needsInfoCount = useMemo(() => list.filter(isRawNeedsInfo).length, [list]);
 
   const reload = () => setList(rawIngredientStore.list());
 
@@ -85,6 +89,7 @@ export default function IngredientsPage() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return list.filter((r) => {
+      if (needsInfoOnly && !isRawNeedsInfo(r)) return false;
       if (activeCategory !== 'all') {
         const cat = r.category || '미분류';
         if (cat !== activeCategory) return false;
@@ -95,7 +100,7 @@ export default function IngredientsPage() {
       }
       return true;
     });
-  }, [list, query, activeCategory]);
+  }, [list, query, activeCategory, needsInfoOnly]);
 
   const handleSave = (data: Omit<RawIngredient, 'id' | 'createdAt' | 'updatedAt'>) => {
     if (editing) {
@@ -153,6 +158,25 @@ export default function IngredientsPage() {
                 onChange={setActiveCategory}
               />
             )}
+            {needsInfoCount > 0 && (
+              <button
+                onClick={() => setNeedsInfoOnly((v) => !v)}
+                className={[
+                  'self-start px-3 py-1.5 rounded-full text-[12px] font-bold tracking-tighter flex items-center gap-1.5 border',
+                  needsInfoOnly
+                    ? 'bg-warning text-white border-warning'
+                    : 'bg-warning-bg text-warning border-warning/40 hover:border-warning',
+                ].join(' ')}
+                title="이름만 등록된 재료(매입가/단가 미입력)만 보기"
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-warning" />
+                정보 필요한 재료만
+                <span className={[
+                  'text-[10px] font-bold px-1.5 py-0 rounded-md tabular-nums',
+                  needsInfoOnly ? 'bg-white/20 text-white/90' : 'bg-warning/20 text-warning',
+                ].join(' ')}>{needsInfoCount}</span>
+              </button>
+            )}
           </div>
 
           {filtered.length === 0 ? (
@@ -170,13 +194,22 @@ export default function IngredientsPage() {
               </div>
               {filtered.map((r) => {
                 const unitCost = getRawIngredientUnitCost(r);
+                const needsInfo = isRawNeedsInfo(r);
                 return (
                   <div
                     key={r.id}
-                    className="md:grid md:grid-cols-[1.2fr_90px_1.4fr_1fr_80px] flex flex-col md:items-center px-4 py-3 border-b border-border last:border-b-0 hover:bg-surface-alt transition-colors gap-2 md:gap-0"
+                    className={[
+                      'md:grid md:grid-cols-[1.2fr_90px_1.4fr_1fr_80px] flex flex-col md:items-center px-4 py-3 border-b border-border last:border-b-0 hover:bg-surface-alt transition-colors gap-2 md:gap-0',
+                      needsInfo ? 'bg-warning-bg/30' : '',
+                    ].join(' ')}
                   >
                     <div className="font-semibold text-ink tracking-tighter">
-                      {r.name}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span>{r.name}</span>
+                        {needsInfo && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-warning text-white tracking-[0.04em]">정보 필요</span>
+                        )}
+                      </div>
                       {r.note && <div className="text-[11px] text-ink-3 font-normal mt-0.5">{r.note}</div>}
                     </div>
                     <div className="text-[12px] text-ink-2">
@@ -187,18 +220,30 @@ export default function IngredientsPage() {
                       )}
                     </div>
                     <div className="text-[12px] text-ink-2">
-                      <span className="font-serif-num">{r.purchaseQty}{r.purchaseUnit}</span>
-                      <span className="text-ink-4 mx-1">에</span>
-                      <span className="font-serif-num font-semibold">{formatKRW(r.purchasePrice)}원</span>
-                      {r.shippingCost > 0 && (
-                        <span className="text-ink-4 text-[11px] ml-1">(+배송 {formatKRW(r.shippingCost)})</span>
+                      {needsInfo ? (
+                        <span className="text-warning font-bold text-[12px]">매입 정보 미입력</span>
+                      ) : (
+                        <>
+                          <span className="font-serif-num">{r.purchaseQty}{r.purchaseUnit}</span>
+                          <span className="text-ink-4 mx-1">에</span>
+                          <span className="font-serif-num font-semibold">{formatKRW(r.purchasePrice)}원</span>
+                          {r.shippingCost > 0 && (
+                            <span className="text-ink-4 text-[11px] ml-1">(+배송 {formatKRW(r.shippingCost)})</span>
+                          )}
+                        </>
                       )}
                     </div>
                     <div className="md:text-right font-serif-num">
-                      <span className="text-[15px] text-accent font-semibold">
-                        {unitCost < 1 ? unitCost.toFixed(2) : Math.round(unitCost).toLocaleString('ko-KR')}
-                      </span>
-                      <span className="text-ink-4 text-[11px] ml-0.5 font-sans">원/{r.baseUnit}</span>
+                      {needsInfo ? (
+                        <span className="text-warning text-[12px] font-sans font-bold">단가 0원</span>
+                      ) : (
+                        <>
+                          <span className="text-[15px] text-accent font-semibold">
+                            {unitCost < 1 ? unitCost.toFixed(2) : Math.round(unitCost).toLocaleString('ko-KR')}
+                          </span>
+                          <span className="text-ink-4 text-[11px] ml-0.5 font-sans">원/{r.baseUnit}</span>
+                        </>
+                      )}
                     </div>
                     <div className="flex items-center md:justify-end gap-1">
                       <button
@@ -326,6 +371,9 @@ function IngredientFormModal({
       purchaseUnit,
       purchasePrice: priceNum,
       shippingCost: shippingNum,
+      // 이 폼은 매입양·매입가가 둘 다 정상이어야만 canSave=true 이므로
+      // 저장 시점엔 항상 정보 완료 상태
+      needsInfo: false,
       note: note.trim() || undefined,
     });
   };

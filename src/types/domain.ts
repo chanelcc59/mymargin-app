@@ -30,6 +30,10 @@ export interface RawIngredient {
   // 자동 계산 결과 (저장 안 하고 계산해서 사용)
   // unitCost = (purchasePrice + shippingCost) ÷ (baseUnit 환산된 매입양)
 
+  // 메뉴 레시피에서 이름만으로 빠르게 추가된 재료 표시.
+  // 정상적인 매입양·매입가가 입력되면 폼에서 자동으로 false 처리됨.
+  needsInfo?: boolean;
+
   note?: string;
   createdAt: number;
   updatedAt: number;

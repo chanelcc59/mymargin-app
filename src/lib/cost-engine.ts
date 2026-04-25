@@ -33,6 +33,15 @@ export function getUnitConversionRatio(baseUnit: Unit, purchaseUnit: Unit): numb
   return 1;
 }
 
+// 재료가 "추가 정보 필요" 상태인지 판단.
+// 명시 플래그(needsInfo)가 true이거나, 매입양·매입가가 0인 경우.
+export function isRawNeedsInfo(raw: RawIngredient): boolean {
+  if (raw.needsInfo) return true;
+  if (raw.purchaseQty <= 0) return true;
+  if (raw.purchasePrice <= 0) return true;
+  return false;
+}
+
 // 매입 단위와 기본 단위가 호환되는지 검증
 export function isCompatibleUnit(baseUnit: Unit, purchaseUnit: Unit): boolean {
   if (baseUnit === purchaseUnit) return true;
@@ -276,6 +285,44 @@ export function judgeMargin(contributionMarginRate: number): MarginTier {
   if (contributionMarginRate >= 0.5) return 'good';
   if (contributionMarginRate >= 0.3) return 'mid';
   return 'risk';
+}
+
+// ============================================
+// 4-2. 메뉴 종합 등급 판정 (점주에게 결론형 라벨로 보여주기 위함)
+// ============================================
+// 한 메뉴의 모든 활성 채널을 종합해서 한 라벨로 판정한다.
+// - review     (가격점검): 손봐야 하는 상태 — 레시피 비어있음, 활성 채널 없음, 판매가 미입력, 적자 채널 존재
+// - caution    (주의)    : 흑자지만 공헌이익률이 위험·중간 구간 (risk/mid 채널 섞임)
+// - recommended (추천)   : 모든 활성 채널이 양호 (>=50%)
+export type MenuTier = 'recommended' | 'caution' | 'review';
+
+export const MENU_TIER_LABEL: Record<MenuTier, string> = {
+  recommended: '추천',
+  caution: '주의',
+  review: '가격점검',
+};
+
+export function judgeMenuTier(
+  menu: Menu,
+  rawIngredients: RawIngredient[],
+  prepItems: PrepItem[]
+): MenuTier {
+  // 레시피가 비어있으면 가격을 논할 단계가 아님 → 가격점검
+  if (menu.recipe.length === 0) return 'review';
+
+  const active = menu.channels.filter((c) => c.isActive);
+  if (active.length === 0) return 'review';
+  if (active.some((c) => !c.salePrice || c.salePrice <= 0)) return 'review';
+
+  const margins = calcAllChannelMargins(menu, rawIngredients, prepItems);
+  if (margins.length === 0) return 'review';
+
+  // 공헌이익이 음수인 채널이 하나라도 있으면 가격점검
+  if (margins.some((m) => m.contributionProfit < 0)) return 'review';
+
+  const tiers = margins.map((m) => judgeMargin(m.contributionMarginRate));
+  if (tiers.every((t) => t === 'good')) return 'recommended';
+  return 'caution';
 }
 
 // ============================================

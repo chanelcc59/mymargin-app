@@ -7,7 +7,9 @@ import { rawIngredientStore, prepItemStore, menuStore } from '@/lib/store';
 import type { Menu, RawIngredient, PrepItem, ChannelKey } from '@/types/domain';
 import {
   calcMenuCost, calcAllChannelMargins, formatKRW, formatRate, judgeMargin,
+  judgeMenuTier, MENU_TIER_LABEL,
 } from '@/lib/cost-engine';
+import type { MenuTier } from '@/lib/cost-engine';
 import { SearchBox, CategoryChips } from '@/components/Filters';
 
 const CHANNEL_LABELS: Record<ChannelKey, string> = {
@@ -18,6 +20,14 @@ const CHANNEL_LABELS: Record<ChannelKey, string> = {
 
 const CATEGORY_ORDER = ['기본', '튀김', '김밥', '스페셜', '사이드', '음료', '세트', '미분류'];
 
+const TIER_BADGE_CLASS: Record<MenuTier, string> = {
+  recommended: 'bg-accent-bg text-accent',
+  caution:     'bg-warning-bg text-warning',
+  review:      'bg-alert-bg text-alert',
+};
+
+const TIER_FILTER_ORDER: MenuTier[] = ['recommended', 'caution', 'review'];
+
 export default function MenusPage() {
   const router = useRouter();
   const [menus, setMenus] = useState<Menu[]>([]);
@@ -27,6 +37,7 @@ export default function MenusPage() {
 
   const [query, setQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState<string>('all');
+  const [activeTier, setActiveTier] = useState<'all' | MenuTier>('all');
 
   const reload = () => {
     setMenus(menuStore.list());
@@ -60,6 +71,19 @@ export default function MenusPage() {
       .map((c) => ({ name: c, count: counts[c] }));
   }, [menus]);
 
+  // 메뉴별 종합 등급 (카드 표시 + 필터 둘 다 사용)
+  const tierByMenuId = useMemo(() => {
+    const map = new Map<string, MenuTier>();
+    menus.forEach((m) => map.set(m.id, judgeMenuTier(m, raws, preps)));
+    return map;
+  }, [menus, raws, preps]);
+
+  const tierCounts = useMemo(() => {
+    const counts: Record<MenuTier, number> = { recommended: 0, caution: 0, review: 0 };
+    tierByMenuId.forEach((t) => { counts[t]++; });
+    return counts;
+  }, [tierByMenuId]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return menus.filter((m) => {
@@ -67,13 +91,14 @@ export default function MenusPage() {
         const cat = m.category || '미분류';
         if (cat !== activeCategory) return false;
       }
+      if (activeTier !== 'all' && tierByMenuId.get(m.id) !== activeTier) return false;
       if (q) {
         const hay = (m.name + ' ' + (m.category || '')).toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
     });
-  }, [menus, query, activeCategory]);
+  }, [menus, query, activeCategory, activeTier, tierByMenuId]);
 
   const handleAdd = () => {
     const name = prompt('새 메뉴 이름');
@@ -132,6 +157,24 @@ export default function MenusPage() {
                 onChange={setActiveCategory}
               />
             )}
+            <div className="flex flex-wrap gap-1.5 -mt-0.5">
+              <TierFilterChip
+                label="전체 라벨"
+                count={menus.length}
+                active={activeTier === 'all'}
+                onClick={() => setActiveTier('all')}
+              />
+              {TIER_FILTER_ORDER.map((t) => (
+                <TierFilterChip
+                  key={t}
+                  label={MENU_TIER_LABEL[t]}
+                  count={tierCounts[t]}
+                  active={activeTier === t}
+                  onClick={() => setActiveTier(t)}
+                  tierClass={TIER_BADGE_CLASS[t]}
+                />
+              ))}
+            </div>
           </div>
 
           {filtered.length === 0 ? (
@@ -141,7 +184,13 @@ export default function MenusPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {filtered.map((m) => (
-                <MenuCard key={m.id} menu={m} raws={raws} preps={preps} />
+                <MenuCard
+                  key={m.id}
+                  menu={m}
+                  raws={raws}
+                  preps={preps}
+                  tier={tierByMenuId.get(m.id) ?? 'review'}
+                />
               ))}
             </div>
           )}
@@ -151,7 +200,14 @@ export default function MenusPage() {
   );
 }
 
-function MenuCard({ menu, raws, preps }: { menu: Menu; raws: RawIngredient[]; preps: PrepItem[] }) {
+function MenuCard({
+  menu, raws, preps, tier,
+}: {
+  menu: Menu;
+  raws: RawIngredient[];
+  preps: PrepItem[];
+  tier: MenuTier;
+}) {
   const cost = calcMenuCost(menu, raws, preps);
   const margins = calcAllChannelMargins(menu, raws, preps);
   const recipeEmpty = menu.recipe.length === 0;
@@ -163,7 +219,12 @@ function MenuCard({ menu, raws, preps }: { menu: Menu; raws: RawIngredient[]; pr
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[16px] font-bold tracking-tighter text-ink truncate">{menu.name}</div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="text-[16px] font-bold tracking-tighter text-ink truncate">{menu.name}</div>
+            <span className={['text-[10px] font-bold px-1.5 py-0.5 rounded-md tracking-[0.04em] flex-shrink-0', TIER_BADGE_CLASS[tier]].join(' ')}>
+              {MENU_TIER_LABEL[tier]}
+            </span>
+          </div>
           {menu.category && (
             <div className="text-[10px] text-ink-3 font-bold tracking-[0.04em] uppercase mt-0.5">{menu.category}</div>
           )}
@@ -223,5 +284,37 @@ function MenuCard({ menu, raws, preps }: { menu: Menu; raws: RawIngredient[]; pr
         </div>
       )}
     </Link>
+  );
+}
+
+function TierFilterChip({
+  label, count, active, onClick, tierClass,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+  tierClass?: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={[
+        'px-3 py-1.5 rounded-full text-[12px] font-bold tracking-tighter transition-colors flex items-center gap-1.5',
+        active
+          ? 'bg-navy text-white border border-navy'
+          : 'bg-surface text-ink-2 border border-border hover:border-border-strong',
+      ].join(' ')}
+    >
+      <span className={[
+        'w-1.5 h-1.5 rounded-full',
+        tierClass ? tierClass.split(' ').find((c) => c.startsWith('bg-')) ?? 'bg-ink-4' : 'bg-ink-4',
+      ].join(' ')} />
+      {label}
+      <span className={[
+        'text-[10px] font-bold px-1.5 py-0 rounded-md tabular-nums',
+        active ? 'bg-white/20 text-white/90' : 'bg-surface-alt text-ink-3',
+      ].join(' ')}>{count}</span>
+    </button>
   );
 }
